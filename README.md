@@ -22,6 +22,8 @@ Im Rettungsdienst muss Dokumentation oft schnell und präzise in Einsatzsoftware
 - **Hell/Dunkel-Modus** – Umschaltbar per Button
 - **LED-Status** – Rot blinkend = kein Gerät, Grün = verbunden
 - **Kein Internet nötig** – Funktioniert komplett offline
+- **Spracheingabe** – Diktieren per Mikrofon-Taste auf dem Handy, Text wird direkt übernommen und gesendet
+- **Alle Endgeräte** – Web-App läuft auf iPhone und Android gleichermaßen
 
 ---
 
