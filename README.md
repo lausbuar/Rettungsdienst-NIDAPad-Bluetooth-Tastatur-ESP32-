@@ -178,6 +178,21 @@ MIT License – frei verwendbar, anpassbar und weiterzugeben.
 
 ---
 
+## 🛒 Hardware kaufen
+
+### ESP32-S3-Zero
+Den Waveshare ESP32-S3-Zero gibt es bei den üblichen Elektronik-Händlern (Amazon, AliExpress, Reichelt, Berrybase).
+
+### USB-C auf USB-A Adapter
+Da der ESP32-S3-Zero nur einen USB-C Anschluss hat, wird ein Adapter für ältere USB-A Ports am Notebook benötigt. Suchbegriff:
+
+> **„USB C auf USB A Adapter für Laden und Datenübertragung. USB 3.0 kompatibel, kompakt und ideal für Smartphones, Laptops und IoT Geräte."**
+
+### 3D-gedrucktes Gehäuse
+Passende Gehäuse für den ESP32-S3-Zero findet ihr mit einer einfachen Suche im Netz – z.B. auf Thingiverse oder Printables. Einfach nach „ESP32-S3-Zero Case" oder „ESP32-S3-Zero Gehäuse" suchen.
+
+---
+
 ## ⚠️ Rechtlicher Hinweis
 
 Dieses Projekt ist ein **unabhängiges Open-Source-Projekt** und steht in **keiner Verbindung** zu NIDA, dem NIDA Pad oder dessen Hersteller.
@@ -185,7 +200,3 @@ Dieses Projekt ist ein **unabhängiges Open-Source-Projekt** und steht in **kein
 Die RD Tastatur simuliert ausschließlich eine **Standard-USB-HID-Tastatur** – identisch mit jeder handelsüblichen Tastatur. Es werden keine Änderungen am NIDA Pad, dessen Software oder Daten vorgenommen. Das Gerät sendet lediglich Tastatureingaben, genau so als würde jemand manuell auf einer Tastatur tippen.
 
 Die Verantwortung für den korrekten Einsatz im klinischen und rettungsdienstlichen Umfeld liegt beim Anwender.
-
-Infos zur Hardware
-Ich habe zu dem ESP32 noch einen USB-C auf USB-A Adapter gekauft. Findet ihr mit folgenden Suchbegriff "USB C auf USB A Adapter für Laden und Datenübertragung. USB 3.0 kompatibel, kompakt und ideal für Smartphones, Laptops und IoT Geräte."
-ESP32 3D gedruckte Gehäuse findet ihr auch im Netz .. 
