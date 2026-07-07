@@ -1,0 +1,706 @@
+/**
+ * ============================================================
+ * RETTUNGSDIENST TASTATUR - ESP32-S3 Firmware
+ * Angepasst fuer: Waveshare ESP32-S3-Zero
+ * ============================================================
+ *
+ * Arduino IDE Einstellungen (ESP32-S3-Zero):
+ *   Board:              ESP32S3 Dev Module
+ *   USB Mode:           USB-OTG (TinyUSB)
+ *   USB CDC On Boot:    Disabled
+ *   USB DFU On Boot:    Disabled
+ *   USB Firmware MSC:   Disabled
+ *   Upload Mode:        UART0 / Hardware CDC
+ *   CPU Frequency:      240MHz
+ *   Flash Mode:         QIO 80MHz
+ *   Flash Size:         4MB (32Mb)
+ *   Partition Scheme:   Default 4MB with spiffs
+ *   PSRAM:              Quad PSRAM
+ *
+ * Flashen: BOOT-Taste halten -> USB-C anstecken -> Upload
+ *          (kein RESET-Taste noetig beim S3-Zero!)
+ * =============Copyright Thomas Wiedemann 202606=======================
+ */
+
+#include "USB.h"
+#include "USBHIDKeyboard.h"
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <Adafruit_NeoPixel.h>
+#include <Preferences.h>
+
+// ── NVS Speicher für Vorlagen ─────────────────────────────────
+Preferences prefs;
+
+// ── RGB LED (GPIO48 = onboard WS2812) ────────────────────────
+#define LED_PIN   21
+#define LED_COUNT 1
+Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// DNS Server für Captive Portal
+DNSServer dnsServer;
+const byte DNS_PORT = 53;
+
+bool     clientConnected = false;
+uint32_t lastBlink       = 0;
+bool     blinkState      = false;
+
+// ── Konfiguration ─────────────────────────────────────────────────────────────
+const char* WIFI_SSID     = "RD-Tastatur";
+const char* WIFI_PASSWORD = "rettung123";
+
+// ── Objekte ───────────────────────────────────────────────────────────────────
+USBHIDKeyboard Keyboard;
+WebServer server(80);
+
+// ── Modifier ─────────────────────────────────────────────────────────────────
+#define MOD_NONE  0x00
+#define MOD_SHIFT 0x02
+#define MOD_ALTGR 0x40
+
+// ── Taste senden ─────────────────────────────────────────────────────────────
+void sendKey(uint8_t keycode, uint8_t modifier) {
+  KeyReport report;
+  memset(&report, 0, sizeof(report));
+  report.modifiers = modifier;
+  report.keys[0]   = keycode;
+  Keyboard.sendReport(&report);
+  delay(12);
+  memset(&report, 0, sizeof(report));
+  Keyboard.sendReport(&report);
+  delay(10);
+}
+
+// ── Zeichen senden DE-QWERTZ ──────────────────────────────────────────────────
+void sendChar(char c) {
+  switch(c) {
+    case 'a': sendKey(0x04,MOD_NONE);  break; case 'A': sendKey(0x04,MOD_SHIFT); break;
+    case 'b': sendKey(0x05,MOD_NONE);  break; case 'B': sendKey(0x05,MOD_SHIFT); break;
+    case 'c': sendKey(0x06,MOD_NONE);  break; case 'C': sendKey(0x06,MOD_SHIFT); break;
+    case 'd': sendKey(0x07,MOD_NONE);  break; case 'D': sendKey(0x07,MOD_SHIFT); break;
+    case 'e': sendKey(0x08,MOD_NONE);  break; case 'E': sendKey(0x08,MOD_SHIFT); break;
+    case 'f': sendKey(0x09,MOD_NONE);  break; case 'F': sendKey(0x09,MOD_SHIFT); break;
+    case 'g': sendKey(0x0A,MOD_NONE);  break; case 'G': sendKey(0x0A,MOD_SHIFT); break;
+    case 'h': sendKey(0x0B,MOD_NONE);  break; case 'H': sendKey(0x0B,MOD_SHIFT); break;
+    case 'i': sendKey(0x0C,MOD_NONE);  break; case 'I': sendKey(0x0C,MOD_SHIFT); break;
+    case 'j': sendKey(0x0D,MOD_NONE);  break; case 'J': sendKey(0x0D,MOD_SHIFT); break;
+    case 'k': sendKey(0x0E,MOD_NONE);  break; case 'K': sendKey(0x0E,MOD_SHIFT); break;
+    case 'l': sendKey(0x0F,MOD_NONE);  break; case 'L': sendKey(0x0F,MOD_SHIFT); break;
+    case 'm': sendKey(0x10,MOD_NONE);  break; case 'M': sendKey(0x10,MOD_SHIFT); break;
+    case 'n': sendKey(0x11,MOD_NONE);  break; case 'N': sendKey(0x11,MOD_SHIFT); break;
+    case 'o': sendKey(0x12,MOD_NONE);  break; case 'O': sendKey(0x12,MOD_SHIFT); break;
+    case 'p': sendKey(0x13,MOD_NONE);  break; case 'P': sendKey(0x13,MOD_SHIFT); break;
+    case 'q': sendKey(0x14,MOD_NONE);  break; case 'Q': sendKey(0x14,MOD_SHIFT); break;
+    case 'r': sendKey(0x15,MOD_NONE);  break; case 'R': sendKey(0x15,MOD_SHIFT); break;
+    case 's': sendKey(0x16,MOD_NONE);  break; case 'S': sendKey(0x16,MOD_SHIFT); break;
+    case 't': sendKey(0x17,MOD_NONE);  break; case 'T': sendKey(0x17,MOD_SHIFT); break;
+    case 'u': sendKey(0x18,MOD_NONE);  break; case 'U': sendKey(0x18,MOD_SHIFT); break;
+    case 'v': sendKey(0x19,MOD_NONE);  break; case 'V': sendKey(0x19,MOD_SHIFT); break;
+    case 'w': sendKey(0x1A,MOD_NONE);  break; case 'W': sendKey(0x1A,MOD_SHIFT); break;
+    case 'x': sendKey(0x1B,MOD_NONE);  break; case 'X': sendKey(0x1B,MOD_SHIFT); break;
+    // Y und Z getauscht QWERTZ
+    case 'y': sendKey(0x1D,MOD_NONE);  break; case 'Y': sendKey(0x1D,MOD_SHIFT); break;
+    case 'z': sendKey(0x1C,MOD_NONE);  break; case 'Z': sendKey(0x1C,MOD_SHIFT); break;
+    // Zahlen
+    case '1': sendKey(0x1E,MOD_NONE);  break; case '!': sendKey(0x1E,MOD_SHIFT); break;
+    case '2': sendKey(0x1F,MOD_NONE);  break; case '"': sendKey(0x1F,MOD_SHIFT); break;
+    case '3': sendKey(0x20,MOD_NONE);  break;
+    case '4': sendKey(0x21,MOD_NONE);  break; case '$': sendKey(0x21,MOD_SHIFT); break;
+    case '5': sendKey(0x22,MOD_NONE);  break; case '%': sendKey(0x22,MOD_SHIFT); break;
+    case '6': sendKey(0x23,MOD_NONE);  break; case '&': sendKey(0x23,MOD_SHIFT); break;
+    case '7': sendKey(0x24,MOD_NONE);  break; case '/': sendKey(0x24,MOD_SHIFT); break;
+    case '8': sendKey(0x25,MOD_NONE);  break; case '(': sendKey(0x25,MOD_SHIFT); break;
+    case '9': sendKey(0x26,MOD_NONE);  break; case ')': sendKey(0x26,MOD_SHIFT); break;
+    case '0': sendKey(0x27,MOD_NONE);  break; case '=': sendKey(0x27,MOD_SHIFT); break;
+    // Sonderzeichen
+    case '-':  sendKey(0x38,MOD_NONE);  break; case '_': sendKey(0x38,MOD_SHIFT); break;
+    case '.':  sendKey(0x37,MOD_NONE);  break; case ':': sendKey(0x37,MOD_SHIFT); break;
+    case ',':  sendKey(0x36,MOD_NONE);  break; case ';': sendKey(0x36,MOD_SHIFT); break;
+    case '+':  sendKey(0x30,MOD_NONE);  break; case '*': sendKey(0x30,MOD_SHIFT); break;
+    case '#':  sendKey(0x31,MOD_NONE);  break;
+    case '<':  sendKey(0x64,MOD_NONE);  break; case '>': sendKey(0x64,MOD_SHIFT); break;
+    case '?':  sendKey(0x2D,MOD_SHIFT); break;
+    case '^':  sendKey(0x35,MOD_NONE);  break;
+    case '@':  sendKey(0x14,MOD_ALTGR); break;
+    case '{':  sendKey(0x24,MOD_ALTGR); break; case '}': sendKey(0x27,MOD_ALTGR); break;
+    case '[':  sendKey(0x25,MOD_ALTGR); break; case ']': sendKey(0x26,MOD_ALTGR); break;
+    case '\\': sendKey(0x2D,MOD_ALTGR); break;
+    case '|':  sendKey(0x64,MOD_ALTGR); break;
+    case '\n': sendKey(0x28,MOD_NONE);  break;
+    case '\t': sendKey(0x2B,MOD_NONE);  break;
+    case ' ':  sendKey(0x2C,MOD_NONE);  break;
+    default: break;
+  }
+}
+
+// ── Unicode senden (Umlaute) ──────────────────────────────────────────────────
+void sendUnicode(uint16_t cp) {
+  switch(cp) {
+    case 0x00E4: sendKey(0x34,MOD_NONE);  break; // ä
+    case 0x00C4: sendKey(0x34,MOD_SHIFT); break; // Ä
+    case 0x00F6: sendKey(0x33,MOD_NONE);  break; // ö
+    case 0x00D6: sendKey(0x33,MOD_SHIFT); break; // Ö
+    case 0x00FC: sendKey(0x2F,MOD_NONE);  break; // ü
+    case 0x00DC: sendKey(0x2F,MOD_SHIFT); break; // Ü
+    case 0x00DF: sendKey(0x2D,MOD_NONE);  break; // ß
+    case 0x20AC: sendKey(0x08,MOD_ALTGR); break; // €
+    case 0x00A7: sendKey(0x20,MOD_SHIFT); break; // §
+    case 0x00B0: sendKey(0x35,MOD_SHIFT); break; // °
+    default: break;
+  }
+}
+
+// ── UTF-8 Text senden ─────────────────────────────────────────────────────────
+void sendText(const String& text) {
+  int i = 0;
+  while (i < (int)text.length()) {
+    uint8_t b = (uint8_t)text[i];
+    if (b < 0x80) {
+      sendChar((char)b);
+      i++;
+    } else if ((b & 0xE0) == 0xC0 && i+1 < (int)text.length()) {
+      uint16_t cp = ((b & 0x1F) << 6) | ((uint8_t)text[i+1] & 0x3F);
+      sendUnicode(cp);
+      i += 2;
+    } else if ((b & 0xF0) == 0xE0 && i+2 < (int)text.length()) {
+      uint16_t cp = ((b & 0x0F) << 12) |
+                    (((uint8_t)text[i+1] & 0x3F) << 6) |
+                    ((uint8_t)text[i+2] & 0x3F);
+      sendUnicode(cp);
+      i += 3;
+    } else { i++; }
+    delay(15);
+  }
+}
+
+// ── HTML ──────────────────────────────────────────────────────────────────────
+const char HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>RD Tastatur</title>
+<style>
+body{background:#0F1117;color:#EAEAEA;font-family:-apple-system,sans-serif;margin:0}
+body.light{background:#F5F5F0;color:#1A1A1A}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.hdr{background:#1A1D26;padding:11px 14px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:100;border-bottom:1px solid #2A2F3E}
+body.light .hdr{background:#FFFFFF;border-bottom-color:#E5E7EB}
+.hdr h1{font-size:15px;font-weight:700;flex:1;margin:0}
+.dot{width:10px;height:10px;border-radius:50%;background:#2ECC71;flex-shrink:0}
+.tbtn2{background:none;border:1px solid #2A2F3E;border-radius:16px;color:#EAEAEA;padding:4px 10px;font-size:12px;cursor:pointer}
+body.light .tbtn2{border-color:#D1D5DB;color:#1A1A1A}
+.sec{padding:12px;background:#1E2130;margin:6px;border-radius:10px;border:1px solid #2A2F3E}
+body.light .sec{background:#FFFFFF;border-color:#E5E7EB}
+.lbl{font-size:10px;font-weight:700;letter-spacing:.1em;color:#E63946;margin-bottom:8px;text-transform:uppercase}
+.hint{font-size:11px;color:#9AA0B2;margin-bottom:6px}
+body.light .hint{color:#6B7280}
+textarea{width:100%;background:#12141C;color:#EAEAEA;border:1px solid #2A2F3E;border-radius:8px;padding:12px;font-size:15px;resize:none;font-family:inherit}
+body.light textarea{background:#F0F0EC;color:#1A1A1A;border-color:#D1D5DB}
+textarea:focus{outline:none;border-color:#E63946}
+.row{display:flex;gap:6px;margin-top:8px}
+button{border:none;border-radius:8px;padding:11px 14px;font-size:13px;font-weight:600;cursor:pointer}
+button:active{opacity:.7}
+.bs{background:#E63946;color:#fff;flex:2;font-size:15px;padding:13px}
+.bc{background:#2A2F3E;color:#EAEAEA;flex:1}
+body.light .bc{background:#E5E7EB;color:#1A1A1A}
+.bs:disabled{background:#888;color:#ccc}
+.prog{height:3px;background:#E63946;width:0;margin-top:6px;border-radius:2px}
+.prog.run{animation:pa 1.2s infinite}
+@keyframes pa{0%{width:0;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0;margin-left:100%}}
+.toolbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.tbtn{background:#2A2F3E;border:none;border-radius:6px;color:#EAEAEA;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer}
+body.light .tbtn{background:#E5E7EB;color:#1A1A1A}
+.tmpl-wrap{margin-bottom:8px}
+.tmpl-info{background:#12141C;border-radius:8px 8px 0 0;padding:12px;border-left:3px solid #E63946;border-top:1px solid #2A2F3E;border-right:1px solid #2A2F3E;cursor:pointer;-webkit-user-select:none;user-select:none}
+body.light .tmpl-info{background:#F8F8F4;border-top-color:#E5E7EB;border-right-color:#E5E7EB}
+.tmpl-info:active{opacity:.75}
+.ttl{font-weight:700;font-size:13px;margin-bottom:2px}
+.prv{font-size:11px;color:#9AA0B2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.light .prv{color:#6B7280}
+.tmpl-btns{display:flex;border-top:1px solid #2A2F3E}
+body.light .tmpl-btns{border-top-color:#E5E7EB}
+.tbn{flex:1;padding:10px;font-size:12px;font-weight:600;cursor:pointer;border:none;border-right:1px solid #2A2F3E;background:#1A1D26;color:#9AA0B2;border-radius:0}
+body.light .tbn{background:#F0F0EC;color:#6B7280;border-right-color:#E5E7EB}
+.tbn:last-child{border-right:none;border-radius:0 0 8px 0}
+.tbn:first-child{border-radius:0 0 0 8px}
+.tbn.del{color:#F87171;background:#1A0D0D}
+body.light .tbn.del{color:#DC2626;background:#FEF2F2}
+.tbn:active{opacity:.6}
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);padding:10px 24px;border-radius:20px;font-weight:600;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999;white-space:nowrap;background:#16a34a;color:#fff}
+.toast.show{opacity:1}
+.toast.err{background:#E63946}
+.modal-wrap{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#0008;z-index:200;align-items:flex-end;justify-content:center}
+.modal-wrap.show{display:flex}
+.modal-box{background:#1E2130;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto}
+body.light .modal-box{background:#FFFFFF}
+.modal-box h2{font-size:15px;font-weight:700;margin-bottom:14px;color:#E63946}
+.minput{width:100%;background:#12141C;color:#EAEAEA;border:1px solid #2A2F3E;border-radius:8px;padding:10px;font-size:14px;margin-bottom:10px;font-family:inherit}
+body.light .minput{background:#F0F0EC;color:#1A1A1A;border-color:#D1D5DB}
+.minput:focus{outline:none;border-color:#E63946}
+.mrow{display:flex;gap:8px;margin-top:4px}
+.mbtn{flex:1;padding:11px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
+.mbtn.ok{background:#E63946;color:#fff}
+.mbtn.cancel{background:#2A2F3E;color:#EAEAEA}
+body.light .mbtn.cancel{background:#E5E7EB;color:#1A1A1A}
+.modal-hint{font-size:11px;color:#9AA0B2;margin-bottom:8px}
+</style>
+</head>
+<body id="body">
+<div class="hdr">
+  <span>&#128657;</span>
+  <h1>RD Tastatur</h1>
+  <button class="tbtn2" onclick="toggleTheme()" id="themeBtn">&#9728; Hell</button>
+  <div class="dot"></div>
+</div>
+<div class="sec">
+  <div class="lbl">Text zum Senden</div>
+  <div class="hint">&#127908; Sprache: Textfeld antippen &#8594; Mikrofon auf Tastatur</div>
+  <textarea id="ta" rows="6" placeholder="Text eingeben oder Vorlage antippen..."></textarea>
+  <div class="prog" id="prog"></div>
+  <div class="row">
+    <button class="bc" onclick="document.getElementById('ta').value=''">&#10005; Leeren</button>
+    <button class="bs" id="bs" onclick="send()">&#9000; SENDEN</button>
+  </div>
+</div>
+<div class="sec">
+  <div class="lbl">Vorlagen</div>
+  <div class="toolbar">
+    <button class="tbtn" onclick="showAddModal()">&#43; Neu</button>
+    <button class="tbtn" onclick="exportTemplates()">&#8593; Export</button>
+    <button class="tbtn" onclick="showImportModal()">&#8595; Import</button>
+    <button class="tbtn" style="color:#f87171" onclick="resetTemplates()">&#8635; Reset</button>
+  </div>
+  <div id="tl"></div>
+</div>
+<div class="modal-wrap" id="modal">
+  <div class="modal-box">
+    <h2 id="modalTitle">Neue Vorlage</h2>
+    <div class="modal-hint" id="modalHint"></div>
+    <input class="minput" id="mTitle" placeholder="Titel...">
+    <textarea class="minput" id="mContent" rows="7" placeholder="Text..."></textarea>
+    <div class="mrow">
+      <button class="mbtn cancel" onclick="closeModal()">Abbrechen</button>
+      <button class="mbtn ok" id="modalSaveBtn" onclick="saveModal()">Speichern</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+// ── Theme ────────────────────────────────────────────────────
+let darkMode = new URLSearchParams(window.location.search).get('theme') !== 'light';
+function applyTheme(){document.getElementById('body').className=darkMode?'':'light';document.getElementById('themeBtn').innerHTML=darkMode?'&#9728; Hell':'&#9790; Dunkel';}
+function toggleTheme(){darkMode=!darkMode;window.location.href='/?theme='+(darkMode?'dark':'light');}
+applyTheme();
+
+// ── Vorlagen ─────────────────────────────────────────────────
+let templates=[], editIdx=-1;
+
+function getDefaults(){return[
+  {t:"Einsatzmeldung",c:"Einsatz: [Art] um [Uhrzeit] Uhr.\nPatient: [Name], [Alter] Jahre.\nBefund: [Befund].\nMassnahmen: [Massnahmen]."},
+  {t:"ABCDE-Schema",c:"A: Atemweg frei/verlegt\nB: AF: [AF]/min, SpO2: [SpO2]%\nC: Puls: [Puls]/min, RR: [RR] mmHg\nD: GCS: [GCS], Pupillen: [Pupillen]\nE: Temp: [Temp] Grad C, BZ: [BZ] mg/dl"},
+  {t:"NACA-Score",c:"NACA: [Score]\n0=Keine Verletzung\nI=Geringfuegig\nII=Ambulant\nIII=Stationaer\nIV=Lebensbedrohlich\nV=Reanimation"},
+  {t:"Uebergabe Notaufnahme",c:"Uebergabe an: [Name]\nPatient: [Alter]J, [Geschlecht]\nEreignis: [Ereignis]\nVitale: RR [RR], Puls [Puls], SpO2 [SpO2]%\nTherapie: [Therapie]\nAllergien: [Allergien]"},
+  {t:"Reanimation",c:"Reanimation: [Uhrzeit]\nRhythmus: [VF/VT/Asystolie/PEA]\nDefis: [Anzahl]\nAdrenalin: [mg]\nROSC: [Ja/Nein] [Uhrzeit]"},
+  {t:"Trauma",c:"Mechanismus: [Mechanismus]\nVerletzungen: [Verletzungen]\nImmobilisation: [Ja/Nein]\nZugang: [IV/IO], [ml]\nSchmerzmittel: [Medikament]"},
+  {t:"Vitalzeichen",c:"RR: [sys]/[dia] mmHg\nPuls: [Puls]/min\nSpO2: [SpO2]%\nAF: [AF]/min\nBZ: [BZ] mg/dl\nTemp: [Temp] Grad C"},
+  {t:"Uebergabe Leitstelle",c:"Fahrzeug: [RTW/NEF]\nOrt: [Adresse]\nDiagnose: [Diagnose]\nZiel: [Krankenhaus]\nAnkunft: [Uhrzeit]"}
+];}
+
+async function loadFromESP(){
+  try{
+    const r=await fetch('/api/templates');
+    const d=await r.json();
+    templates=Array.isArray(d)&&d.length>0?d:getDefaults();
+  }catch(e){templates=getDefaults();}
+  render();
+}
+
+async function saveToESP(){
+  try{
+    const r=await fetch('/api/templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(templates)});
+    const d=await r.json();
+    if(d.ok)toast('\u2713 Gespeichert');else toast('Fehler',1);
+  }catch(e){toast('Verbindungsfehler',1);}
+}
+
+function render(){
+  document.getElementById('tl').innerHTML=templates.map((x,i)=>`
+    <div class="tmpl-wrap">
+      <div class="tmpl-info" ontouchend="selTouch(${i},event)" onclick="sel(${i})">
+        <div class="ttl">${x.t}</div>
+        <div class="prv">${x.c.replace(/\n/g,' \u2022 ')}</div>
+      </div>
+      <div class="tmpl-btns">
+        <button class="tbn" ontouchend="editTouch(${i},event)" onclick="editTmpl(${i})">&#9998; Bearbeiten</button>
+        <button class="tbn del" ontouchend="delTouch(${i},event)" onclick="delTmpl(${i})">&#128465; Loeschen</button>
+      </div>
+    </div>`).join('');
+}
+
+// Scroll-Erkennung: touchstart Position merken
+// wenn beim touchend zu weit bewegt -> kein Klick
+let _tx=0,_ty=0,_scrolled=false;
+document.addEventListener('touchstart',function(e){
+  _tx=e.touches[0].clientX;_ty=e.touches[0].clientY;_scrolled=false;
+},{passive:true});
+document.addEventListener('touchmove',function(e){
+  if(Math.abs(e.touches[0].clientX-_tx)>8||Math.abs(e.touches[0].clientY-_ty)>8)_scrolled=true;
+},{passive:true});
+
+function selTouch(i,e){if(_scrolled)return;e.preventDefault();sel(i);}
+function editTouch(i,e){if(_scrolled)return;e.preventDefault();editTmpl(i);}
+function delTouch(i,e){if(_scrolled)return;e.preventDefault();delTmpl(i);}
+
+function sel(i){
+  document.getElementById('ta').value=templates[i].c;
+  document.getElementById('ta').scrollIntoView({behavior:'smooth',block:'center'});
+  toast('\u2713 '+templates[i].t);
+}
+
+// ── Modal ─────────────────────────────────────────────────────
+function openModal(title,hint,tval,cval,saveFn){
+  document.getElementById('modalTitle').textContent=title;
+  document.getElementById('modalHint').textContent=hint||'';
+  document.getElementById('mTitle').value=tval||'';
+  document.getElementById('mTitle').style.display=saveFn===doExportCopy?'none':'block';
+  document.getElementById('mContent').value=cval||'';
+  document.getElementById('modalSaveBtn').onclick=saveFn;
+  document.getElementById('modal').className='modal-wrap show';
+  setTimeout(()=>{
+    const ta=document.getElementById('mContent');
+    if(saveFn===doExportCopy){ta.select();ta.setSelectionRange(0,99999);}
+    else document.getElementById(saveFn===doImportText?'mContent':'mTitle').focus();
+  },150);
+}
+
+function closeModal(){
+  document.getElementById('modal').className='modal-wrap';
+  document.getElementById('mTitle').style.display='block';
+  document.getElementById('modalSaveBtn').onclick=saveModal;
+  document.getElementById('modalHint').textContent='';
+}
+
+function showAddModal(){
+  editIdx=-1;
+  openModal('Neue Vorlage','','','',saveModal);
+}
+
+function editTmpl(i){
+  editIdx=i;
+  openModal('Vorlage bearbeiten','',templates[i].t,templates[i].c,saveModal);
+}
+
+function saveModal(){
+  const t=document.getElementById('mTitle').value.trim();
+  const c=document.getElementById('mContent').value.trim();
+  if(!t||!c){alert('Bitte Titel und Text eingeben');return;}
+  if(editIdx>=0)templates[editIdx]={t,c};else templates.push({t,c});
+  closeModal();render();saveToESP();
+}
+
+function delTmpl(i){
+  const name=templates[i]?templates[i].t:'?';
+  if(!confirm('Loeschen: "'+name+'"?'))return;
+  templates.splice(i,1);
+  render();saveToESP();
+}
+
+async function resetTemplates(){
+  if(!confirm('Alle Vorlagen auf Standard zuruecksetzen?'))return;
+  templates=getDefaults();render();saveToESP();
+}
+
+// ── Export (iOS: kein Download moeglich -> Text zum Kopieren) ─
+function exportTemplates(){
+  let txt='';
+  templates.forEach(t=>{txt+='=== '+t.t+' ===\n'+t.c+'\n\n';});
+  openModal('Export - Text kopieren','Alles markieren und kopieren (langer Druck -> Alles auswaehlen)','',txt,doExportCopy);
+}
+function doExportCopy(){
+  const ta=document.getElementById('mContent');
+  ta.select();ta.setSelectionRange(0,99999);
+  try{document.execCommand('copy');toast('\u2713 Kopiert!');}
+  catch(e){toast('Manuell kopieren',1);}
+}
+
+// ── Import (iOS: Text einfuegen statt Datei) ─────────────────
+function showImportModal(){
+  openModal('Import - Text einfuegen','Vorlagen-Text hier einfuegen (aus Export kopiert)','','',doImportText);
+}
+function doImportText(){
+  const text=document.getElementById('mContent').value;
+  const titleRe=/=== (.+?) ===/g;
+  const titles=[];let m;
+  while((m=titleRe.exec(text))!==null)titles.push(m[1]);
+  const parts=text.split(/=== .+? ===\n/).slice(1).map(s=>s.trim());
+  const imported=titles.map((t,i)=>({t,c:parts[i]||''})).filter(x=>x.c);
+  if(!imported.length){toast('Keine Vorlagen gefunden',1);return;}
+  templates=templates.concat(imported);
+  closeModal();render();saveToESP();
+  toast('\u2713 '+imported.length+' importiert');
+}
+
+// ── Senden ────────────────────────────────────────────────────
+async function send(){
+  const text=document.getElementById('ta').value.trim();
+  if(!text){toast('Kein Text!',1);return;}
+  const bs=document.getElementById('bs'),pr=document.getElementById('prog');
+  bs.disabled=true;bs.textContent='...';pr.className='prog run';
+  try{
+    const r=await fetch('/send',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'text='+encodeURIComponent(text)});
+    const d=await r.json();
+    if(d.ok)toast('\u2713 Gesendet!');else toast('Fehler',1);
+  }catch(e){toast('Verbindungsfehler',1);}
+  bs.disabled=false;bs.textContent='\u2328 SENDEN';pr.className='prog';
+}
+
+function toast(m,err){
+  const t=document.getElementById('toast');
+  t.textContent=m;t.className='toast'+(err?' err':'')+' show';
+  clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast'+(err?' err':''),2800);
+}
+
+document.getElementById('modal').addEventListener('click',function(e){if(e.target===this)closeModal();});
+fetch('/connect',{method:'POST'}).catch(()=>{});
+window.addEventListener('beforeunload',()=>{fetch('/disconnect',{method:'POST'}).catch(()=>{});});
+
+loadFromESP();
+</script>
+</body>
+</html>)HTML";
+
+// ── Captive Portal Handler ────────────────────────────────────────────────────
+void handleCaptivePortal() {
+  server.sendHeader("Location", "http://192.168.4.1", true);
+  server.send(302, "text/plain", "");
+}
+
+// iOS Success Seite - gibt bewusst KEINEN Success zurueck
+// -> iOS denkt kein Internet -> oeffnet Captive Portal Browser
+void handleAppleHotspot() {
+  // Wichtig: Content muss sich von echtem Apple Response unterscheiden
+  // Echter Apple Response: "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"
+  // Wir senden eine Weiterleitung statt Success -> iOS oeffnet Browser
+  server.sendHeader("Location", "http://192.168.4.1", true);
+  server.send(302, "text/html", "");
+}
+
+// Windows / Android Captive Portal
+void handleGenericPortal() {
+  server.sendHeader("Location", "http://192.168.4.1", true);
+  server.send(302, "text/plain", "");
+}
+
+bool isCaptivePortalRequest() {
+  String host = server.hostHeader();
+  return (host != "192.168.4.1" && host != "");
+}
+
+// ── HTTP Handler ──────────────────────────────────────────────────────────────
+void handleRoot() {
+  server.send_P(200, "text/html; charset=utf-8", HTML);
+}
+
+void handleSend() {
+  clientConnected = true;
+  if (!server.hasArg("text")) {
+    server.send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  String text = server.arg("text");
+  server.send(200, "application/json", "{\"ok\":true}");
+  delay(100);
+  sendText(text);
+}
+
+void handleConnect() {
+  clientConnected = true;
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleDisconnect() {
+  clientConnected = false;
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// ── LED Update ───────────────────────────────────────────────────────────────
+void updateLED() {
+  uint8_t stations = WiFi.softAPgetStationNum();
+  bool connected = (stations > 0);
+
+  if (connected) {
+    if (!clientConnected) {
+      clientConnected = true;
+      // GRUEN = verbunden
+      // S3-Zero WS2812: Color(R, G, B) - Farbreihenfolge RGB
+      led.setPixelColor(0, led.Color(60, 0, 0));  // Gruen
+      led.show();
+    }
+  } else {
+    if (clientConnected) {
+      clientConnected = false;
+    }
+    // ROT blinkend = nicht verbunden
+    uint32_t now = millis();
+    if (now - lastBlink > 600) {
+      lastBlink = now;
+      blinkState = !blinkState;
+      led.setPixelColor(0, blinkState ? led.Color(0, 60, 0) : led.Color(0, 0, 0));  // Rot
+      led.show();
+    }
+  }
+}
+
+// ── Vorlagen NVS Funktionen ───────────────────────────────────────────────────
+
+// Liest gespeicherte Vorlagen aus NVS, gibt JSON-String zurück
+// Wenn leer -> gibt leeren String zurück
+String loadTemplatesFromNVS() {
+  prefs.begin("rd_tmpl", true);  // read-only
+  String data = prefs.getString("templates", "");
+  prefs.end();
+  return data;
+}
+
+// Speichert Vorlagen-JSON in NVS
+void saveTemplatesToNVS(const String& json) {
+  prefs.begin("rd_tmpl", false);  // read-write
+  prefs.putString("templates", json);
+  prefs.end();
+}
+
+// Gibt Standard-Vorlagen als JSON zurück
+String getDefaultTemplates() {
+  String j = "[";
+  j += "{\"t\":\"Einsatzmeldung\",\"c\":\"Einsatz: [Art] um [Uhrzeit] Uhr.\\nPatient: [Name], [Alter] Jahre.\\nBefund: [Befund].\\nMassnahmen: [Massnahmen].\"},";
+  j += "{\"t\":\"ABCDE-Schema\",\"c\":\"A: Atemweg frei/verlegt\\nB: AF: [AF]/min, SpO2: [SpO2]%\\nC: Puls: [Puls]/min, RR: [RR] mmHg\\nD: GCS: [GCS], Pupillen: [Pupillen]\\nE: Temp: [Temp] Grad C, BZ: [BZ] mg/dl\"},";
+  j += "{\"t\":\"NACA-Score\",\"c\":\"NACA: [Score]\\n0=Keine Verletzung\\nI=Geringfuegig\\nII=Ambulant\\nIII=Stationaer\\nIV=Lebensbedrohlich\\nV=Reanimation\"},";
+  j += "{\"t\":\"Uebergabe Notaufnahme\",\"c\":\"Uebergabe an: [Name]\\nPatient: [Alter]J, [Geschlecht]\\nEreignis: [Ereignis]\\nVitale: RR [RR], Puls [Puls], SpO2 [SpO2]%\\nTherapie: [Therapie]\\nAllergien: [Allergien]\"},";
+  j += "{\"t\":\"Reanimation\",\"c\":\"Reanimation: [Uhrzeit]\\nRhythmus: [VF/VT/Asystolie/PEA]\\nDefis: [Anzahl]\\nAdrenalin: [mg]\\nROSC: [Ja/Nein] [Uhrzeit]\"},";
+  j += "{\"t\":\"Trauma\",\"c\":\"Mechanismus: [Mechanismus]\\nVerletzungen: [Verletzungen]\\nImmobilisation: [Ja/Nein]\\nZugang: [IV/IO], [ml]\\nSchmerzmittel: [Medikament]\"},";
+  j += "{\"t\":\"Vitalzeichen\",\"c\":\"RR: [sys]/[dia] mmHg\\nPuls: [Puls]/min\\nSpO2: [SpO2]%\\nAF: [AF]/min\\nBZ: [BZ] mg/dl\\nTemp: [Temp] Grad C\"},";
+  j += "{\"t\":\"Uebergabe Leitstelle\",\"c\":\"Fahrzeug: [RTW/NEF]\\nOrt: [Adresse]\\nDiagnose: [Diagnose]\\nZiel: [Krankenhaus]\\nAnkunft: [Uhrzeit]\"}";
+  j += "]";
+  return j;
+}
+
+// ── API Handler für Vorlagen ──────────────────────────────────────────────────
+
+// GET /api/templates -> gibt alle Vorlagen als JSON
+void handleGetTemplates() {
+  String data = loadTemplatesFromNVS();
+  if (data.isEmpty()) {
+    data = getDefaultTemplates();
+  }
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json; charset=utf-8", data);
+}
+
+// POST /api/templates -> speichert alle Vorlagen (Body = JSON Array)
+void handleSaveTemplates() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"ok\":false,\"err\":\"kein body\"}");
+    return;
+  }
+  String json = server.arg("plain");
+  // Einfache Validierung: muss mit [ anfangen
+  if (!json.startsWith("[")) {
+    server.send(400, "application/json", "{\"ok\":false,\"err\":\"ungueltig\"}");
+    return;
+  }
+  saveTemplatesToNVS(json);
+  Serial.println("[RD] Vorlagen gespeichert: " + String(json.length()) + " Bytes");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// POST /api/reset -> setzt Vorlagen auf Standard zurück
+void handleResetTemplates() {
+  prefs.begin("rd_tmpl", false);
+  prefs.remove("templates");
+  prefs.end();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// ── Setup ─────────────────────────────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("[RD] Starte...");
+
+  // LED initialisieren
+  led.begin();
+  led.setBrightness(80);
+  led.setPixelColor(0, led.Color(40, 0, 0));
+  led.show();
+
+  // USB HID
+  USB.productName("RD Tastatur");
+  USB.manufacturerName("Rettungsdienst");
+  Keyboard.begin();
+  USB.begin();
+  Serial.println("[RD] USB HID gestartet");
+
+  delay(1000);
+
+  // WLAN Hotspot
+  WiFi.mode(WIFI_AP);
+  bool ok = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("[RD] Hotspot: ");
+  Serial.println(ok ? "OK" : "FEHLER");
+  Serial.print("[RD] IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  // Webserver
+  // Hauptseite
+  server.on("/",                           HTTP_GET,  handleRoot);
+  server.on("/send",                       HTTP_POST, handleSend);
+  server.on("/connect",                    HTTP_POST, handleConnect);
+  server.on("/disconnect",                 HTTP_POST, handleDisconnect);
+  // Vorlagen API
+  server.on("/api/templates",              HTTP_GET,  handleGetTemplates);
+  server.on("/api/templates",              HTTP_POST, handleSaveTemplates);
+  server.on("/api/reset",                  HTTP_POST, handleResetTemplates);
+  // ── Apple iOS Captive Portal Check URLs ──────────────────────
+  // iOS 7+: prueft /hotspot-detect.html bei captive.apple.com
+  server.on("/hotspot-detect.html",        HTTP_GET,  handleAppleHotspot);
+  // iOS neuere Versionen
+  server.on("/library/test/success.html",  HTTP_GET,  handleAppleHotspot);
+  server.on("/bag",                        HTTP_GET,  handleAppleHotspot);
+  // ── Android Captive Portal ───────────────────────────────────
+  server.on("/generate_204",               HTTP_GET,  handleGenericPortal);
+  server.on("/gen_204",                    HTTP_GET,  handleGenericPortal);
+  // ── Windows NCA ──────────────────────────────────────────────
+  server.on("/ncsi.txt",                   HTTP_GET,  handleGenericPortal);
+  server.on("/connecttest.txt",            HTTP_GET,  handleGenericPortal);
+  server.on("/fwlink",                     HTTP_GET,  handleGenericPortal);
+  server.on("/redirect",                   HTTP_GET,  handleGenericPortal);
+  // Alles andere -> Weiterleitung
+  server.onNotFound([]() {
+    if (isCaptivePortalRequest()) {
+      handleCaptivePortal();
+    } else {
+      server.sendHeader("Location", "http://192.168.4.1", true);
+      server.send(302, "text/plain", "");
+    }
+  });
+  server.begin();
+
+  // DNS Server starten - leitet ALLE Domains auf ESP32 um
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+  Serial.println("[RD] Bereit!");
+  Serial.println("[RD] WLAN: RD-Tastatur | PW: rettung123");
+  Serial.println("[RD] URL: 192.168.4.1");
+}
+
+// ── Loop ──────────────────────────────────────────────────────────────────────
+void loop() {
+  dnsServer.processNextRequest();
+  server.handleClient();
+  updateLED();
+  delay(1);
+}
