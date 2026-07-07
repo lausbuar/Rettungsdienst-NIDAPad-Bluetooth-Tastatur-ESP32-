@@ -178,15 +178,6 @@ MIT License – frei verwendbar, anpassbar und weiterzugeben.
 
 ---
 
-## 🤝 Beitragen
-
-Pull Requests und Issues sind willkommen. Besonders interessant:
-- Weitere Vorlagen für andere Fachbereiche
-- Unterstützung für Android Captive Portal Verbesserungen
-- Mehrsprachigkeit (AT, CH Varianten)
-
----
-
 ## ⚠️ Rechtlicher Hinweis
 
 Dieses Projekt ist ein **unabhängiges Open-Source-Projekt** und steht in **keiner Verbindung** zu NIDA, dem NIDA Pad oder dessen Hersteller.
