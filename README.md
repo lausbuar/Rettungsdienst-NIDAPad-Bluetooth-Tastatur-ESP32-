@@ -185,3 +185,7 @@ Dieses Projekt ist ein **unabhängiges Open-Source-Projekt** und steht in **kein
 Die RD Tastatur simuliert ausschließlich eine **Standard-USB-HID-Tastatur** – identisch mit jeder handelsüblichen Tastatur. Es werden keine Änderungen am NIDA Pad, dessen Software oder Daten vorgenommen. Das Gerät sendet lediglich Tastatureingaben, genau so als würde jemand manuell auf einer Tastatur tippen.
 
 Die Verantwortung für den korrekten Einsatz im klinischen und rettungsdienstlichen Umfeld liegt beim Anwender.
+
+Infos zur Hardware
+Ich habe zu dem ESP32 noch einen USB-C auf USB-A Adapter gekauft. Findet ihr mit folgenden Suchbegriff "USB C auf USB A Adapter für Laden und Datenübertragung. USB 3.0 kompatibel, kompakt und ideal für Smartphones, Laptops und IoT Geräte."
+ESP32 3D gedruckte Gehäuse findet ihr auch im Netz .. 
